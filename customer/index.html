@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>고객 대시보드</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Pretendard',-apple-system,sans-serif; background:#f8fafc; color:#0f172a; padding:24px; }
+  .wrap { max-width:1200px; margin:0 auto; }
+  header { margin-bottom:20px; display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; }
+  header h1 { font-size:22px; font-weight:700; }
+  header .sub { font-size:13px; color:#64748b; }
+  header a { margin-left:auto; font-size:13px; color:#64748b; text-decoration:none; }
+  .cards { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:14px; }
+  .card { background:#fff; border:1px solid #e2e8f0; border-radius:14px; padding:18px 20px; }
+  .card .label { font-size:13px; color:#64748b; margin-bottom:6px; }
+  .card .value { font-size:26px; font-weight:700; letter-spacing:-0.5px; }
+  .card .value.big { font-size:32px; color:#0d9488; }
+  .card .sub { font-size:12.5px; color:#64748b; margin-top:6px; }
+  .card .sub strong { color:#0f172a; }
+  .up { color:#dc2626; } .down { color:#16a34a; } .upgood { color:#16a34a; } .downbad { color:#dc2626; }
+  .grid2 { display:grid; grid-template-columns:3fr 2fr; gap:14px; margin-bottom:14px; }
+  .grid2b { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  .panel { background:#fff; border:1px solid #e2e8f0; border-radius:14px; padding:20px; }
+  .panel h2 { font-size:15px; font-weight:600; margin-bottom:14px; }
+  .panel h2 span { font-size:12px; font-weight:400; color:#94a3b8; margin-left:6px; }
+  table.cohort { width:100%; border-collapse:separate; border-spacing:3px; font-size:12.5px; }
+  table.cohort th { color:#64748b; font-weight:500; padding:5px; text-align:center; }
+  table.cohort th:first-child { text-align:left; }
+  table.cohort td { text-align:center; padding:8px 4px; border-radius:6px; font-weight:600; }
+  table.cohort td.m { text-align:left; font-weight:500; color:#475569; background:none; }
+  table.cohort td.empty { background:#f1f5f9; color:#cbd5e1; }
+  .legend { display:flex; flex-direction:column; gap:8px; font-size:13px; margin-top:14px; }
+  .legend .li { display:flex; align-items:center; gap:8px; color:#475569; }
+  .legend .dot { width:10px; height:10px; border-radius:3px; flex-shrink:0; }
+  .rank-row { display:flex; align-items:center; gap:10px; margin-bottom:12px; }
+  .rank-name { width:74px; font-size:13.5px; color:#334155; flex-shrink:0; }
+  .rank-bar-area { flex:1; background:#e6f5f3; border-radius:4px; height:22px; }
+  .rank-bar { height:100%; background:#0d9488; border-radius:4px; }
+  .rank-amt { width:60px; text-align:right; font-size:13px; font-weight:600; flex-shrink:0; }
+  .err { background:#fff; border:1px solid #fca5a5; color:#b91c1c; border-radius:14px; padding:20px; font-size:14px; line-height:1.6; display:none; margin-bottom:14px; white-space:pre-wrap; word-break:break-all; }
+  .loading { text-align:center; color:#94a3b8; padding:60px 0; font-size:14px; }
+  svg text { font-family:'Pretendard',sans-serif; }
+  @media (max-width:860px) {
+    body { padding:14px; }
+    .cards { grid-template-columns:repeat(2,1fr); }
+    .grid2, .grid2b { grid-template-columns:1fr; }
+    .card .value.big { font-size:26px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>👥 고객 대시보드</h1>
+    <span class="sub" id="updated"></span>
+    <a href="../">← 전체 대시보드</a>
+  </header>
+
+  <div class="err" id="errBox"></div>
+  <div class="loading" id="loading">데이터를 불러오는 중…</div>
+
+  <div id="content" style="display:none">
+    <div class="cards" id="cards"></div>
+
+    <div class="grid2">
+      <div class="panel">
+        <h2>코호트 잔존율 <span>유입 월별, 몇 달 뒤 몇 % 남았나</span></h2>
+        <div id="cohort"></div>
+      </div>
+      <div class="panel">
+        <h2>고객 구성</h2>
+        <div id="donut"></div>
+      </div>
+    </div>
+
+    <div class="grid2b" style="margin-top:14px">
+      <div class="panel">
+        <h2>기간별 재구매율</h2>
+        <div id="repeat"></div>
+      </div>
+      <div class="panel">
+        <h2>월별 이탈률 <span>점선 = 목표 5.0%</span></h2>
+        <div id="churn"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const { createClient } = supabase;
+const db = createClient(
+  'https://ngqjcxjojskvglburgoc.supabase.co',
+  'sb_publishable_DB_a5tbS3nFQtukwe8NqPA_L5ACxV4x'
+);
+const fmt = n => n.toLocaleString('ko-KR');
+const CHURN_TARGET = 5.0;
+
+function sparkline(vals, color) {
+  const W = 120, H = 30, mn = Math.min(...vals), mx = Math.max(...vals);
+  const pts = vals.map((v,i)=>[i/(vals.length-1)*(W-8)+4, H-4-((v-mn)/((mx-mn)||1))*(H-8)]);
+  const d = pts.map((p,i)=>(i?'L':'M')+p[0].toFixed(1)+','+p[1].toFixed(1)).join(' ');
+  const last = pts[pts.length-1];
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:110px;height:28px;margin-top:6px">
+    <path d="${d}" fill="none" stroke="${color}" stroke-width="2"/>
+    <circle cx="${last[0]}" cy="${last[1]}" r="3" fill="${color}"/></svg>`;
+}
+
+async function main() {
+  const [s, co, rp] = await Promise.all([
+    db.from('customer_summary').select('*').order('sort_order', { ascending: true }),
+    db.from('customer_cohort').select('*').order('sort_order', { ascending: true }),
+    db.from('customer_repeat').select('*').order('sort_order', { ascending: true })
+  ]);
+  for (const res of [s, co, rp]) if (res.error) throw res.error;
+  const sum = s.data, cohort = co.data, repeat = rp.data;
+  const cur = sum[sum.length-1], prev = sum[sum.length-2];
+  const rp6 = repeat.find(x => x.period.includes('6개월')) || repeat[2];
+
+  // ---- 카드 ----
+  const churnDiff = (cur.churn_rate - prev.churn_rate).toFixed(1);
+  const ltvDiff = cur.ltv - prev.ltv;
+  document.getElementById('cards').innerHTML = `
+    <div class="card">
+      <div class="label">전체 고객 수 (${cur.month})</div>
+      <div class="value big">${fmt(cur.total_customers)}<span style="font-size:16px">명</span></div>
+      <div class="sub">이번 달 신규 <strong>+${fmt(cur.new_customers)}명</strong></div>
+    </div>
+    <div class="card">
+      <div class="label">재구매율 (6개월)</div>
+      <div class="value">${rp6.rate}<span style="font-size:15px">%</span></div>
+      <div class="sub">고객 100명 중 ${Math.round(rp6.rate)}명이 다시 구매</div>
+    </div>
+    <div class="card">
+      <div class="label">이탈률</div>
+      <div class="value">${cur.churn_rate}<span style="font-size:15px">%</span></div>
+      <div class="sub">전월 대비 <strong class="${churnDiff >= 0 ? 'up' : 'down'}">${churnDiff >= 0 ? '+' : ''}${churnDiff}%p</strong></div>
+      ${sparkline(sum.map(x=>Number(x.churn_rate)), '#dc2626')}
+    </div>
+    <div class="card">
+      <div class="label">LTV (고객 생애 가치)</div>
+      <div class="value">${fmt(Math.round(cur.ltv/10000))}<span style="font-size:15px">만원</span></div>
+      <div class="sub">전월 대비 <strong class="${ltvDiff >= 0 ? 'upgood' : 'downbad'}">${ltvDiff >= 0 ? '+' : ''}${fmt(Math.round(ltvDiff/10000))}만원</strong></div>
+      ${sparkline(sum.map(x=>Number(x.ltv)), '#0d9488')}
+    </div>`;
+
+  // ---- 코호트 표 ----
+  const months = [...new Set(cohort.map(x => x.cohort_month))];
+  const maxAfter = 5;
+  let thead = '<tr><th>유입 월</th>';
+  for (let i = 0; i <= maxAfter; i++) thead += `<th>M+${i}</th>`;
+  thead += '</tr>';
+  let rows = '';
+  months.forEach(mo => {
+    let tds = `<td class="m">${mo}</td>`;
+    for (let i = 0; i <= maxAfter; i++) {
+      const cell = cohort.find(x => x.cohort_month === mo && x.months_after === i);
+      if (!cell) { tds += '<td class="empty">–</td>'; continue; }
+      const v = Number(cell.retention);
+      const alpha = 0.08 + (v / 100) * 0.85;
+      const txt = v > 55 ? '#fff' : '#0f172a';
+      tds += `<td style="background:rgba(13,148,136,${alpha.toFixed(2)});color:${txt}">${v}%</td>`;
+    }
+    rows += `<tr>${tds}</tr>`;
+  });
+  document.getElementById('cohort').innerHTML = `<table class="cohort">${thead}${rows}</table>`;
+
+  // ---- 도넛 (고객 구성: 신규 / 재구매 / 기존·휴면) ----
+  const newC = cur.new_customers;
+  const repC = Math.round(cur.total_customers * rp6.rate / 100);
+  const restC = cur.total_customers - newC - repC;
+  const seg = [
+    { name: '재구매 고객', v: repC, col: '#0d9488' },
+    { name: '신규 고객', v: newC, col: '#5eead4' },
+    { name: '기존·휴면', v: restC, col: '#cbd5e1' }
+  ];
+  const total = seg.reduce((a,x)=>a+x.v,0);
+  const R = 54, C = 2 * Math.PI * R;
+  let off = 0, circles = '';
+  seg.forEach(x => {
+    const len = x.v / total * C;
+    circles += `<circle r="${R}" cx="70" cy="70" fill="none" stroke="${x.col}" stroke-width="22"
+      stroke-dasharray="${(len-2).toFixed(1)} ${(C-len+2).toFixed(1)}" stroke-dashoffset="${(-off).toFixed(1)}"
+      transform="rotate(-90 70 70)"/>`;
+    off += len;
+  });
+  document.getElementById('donut').innerHTML = `
+    <div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap">
+      <svg viewBox="0 0 140 140" style="width:150px;height:150px;flex-shrink:0">
+        ${circles}
+        <text x="70" y="66" text-anchor="middle" font-size="19" font-weight="700" fill="#0f172a">${fmt(cur.total_customers)}</text>
+        <text x="70" y="84" text-anchor="middle" font-size="11" fill="#64748b">전체 고객</text>
+      </svg>
+      <div class="legend">
+        ${seg.map(x=>`<div class="li"><div class="dot" style="background:${x.col}"></div>${x.name} <b>${fmt(x.v)}명</b> (${(x.v/total*100).toFixed(1)}%)</div>`).join('')}
+        <div class="li" style="margin-top:6px;padding-top:8px;border-top:1px solid #eef2f7">LTV <b>${fmt(Math.round(cur.ltv/10000))}만원</b></div>
+      </div>
+    </div>
+    <div style="font-size:11.5px;color:#94a3b8;margin-top:10px">※ 재구매 = 전체×6개월 재구매율 추정</div>`;
+
+  // ---- 재구매율 가로 막대 ----
+  const maxR = Math.max(...repeat.map(x=>Number(x.rate)));
+  document.getElementById('repeat').innerHTML = repeat.map(x => `
+    <div class="rank-row">
+      <div class="rank-name">${x.period}</div>
+      <div class="rank-bar-area"><div class="rank-bar" style="width:${x.rate/maxR*100}%"></div></div>
+      <div class="rank-amt">${x.rate}%</div>
+    </div>`).join('');
+
+  // ---- 이탈률 선그래프 ----
+  const W = 480, H = 210, padL = 38, padB = 28, padT = 18;
+  const cw = W - padL - 14, chH = H - padT - padB;
+  const cvals = sum.map(x=>Number(x.churn_rate));
+  const cMin = Math.min(...cvals, CHURN_TARGET) - 0.8, cMax = Math.max(...cvals, CHURN_TARGET) + 0.8;
+  const pts = sum.map((d,i)=>[padL + cw/sum.length*(i+0.5), padT + chH - ((d.churn_rate-cMin)/(cMax-cMin)*chH)]);
+  const line = pts.map((p,i)=>(i?'L':'M')+p[0]+','+p[1]).join(' ');
+  const ty = padT + chH - ((CHURN_TARGET-cMin)/(cMax-cMin)*chH);
+  const dots = pts.map((p,i)=>`<circle cx="${p[0]}" cy="${p[1]}" r="4" fill="#0d9488" stroke="#fff" stroke-width="2"/>
+    <text x="${p[0]}" y="${p[1]-10}" text-anchor="middle" font-size="10.5" fill="#475569" font-weight="600">${cvals[i]}%</text>`).join('');
+  const xl = sum.map((d,i)=>`<text x="${pts[i][0]}" y="${H-8}" text-anchor="middle" font-size="12" fill="#64748b">${d.month}</text>`).join('');
+  document.getElementById('churn').innerHTML = `
+    <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto">
+      <line x1="${padL}" y1="${ty}" x2="${W-14}" y2="${ty}" stroke="#94a3b8" stroke-dasharray="5 4" stroke-width="1.5"/>
+      <text x="${W-16}" y="${ty-6}" text-anchor="end" font-size="11" fill="#64748b">목표 ${CHURN_TARGET}%</text>
+      <path d="${line}" fill="none" stroke="#0d9488" stroke-width="2"/>${dots}${xl}
+    </svg>`;
+
+  document.getElementById('updated').textContent =
+    new Date().toLocaleString('ko-KR', { dateStyle: 'medium', timeStyle: 'short' }) + ' 기준';
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('content').style.display = 'block';
+}
+main().catch(e => {
+  document.getElementById('loading').style.display = 'none';
+  const box = document.getElementById('errBox');
+  box.style.display = 'block';
+  box.textContent = '데이터를 불러오지 못했습니다.\n\n오류 내용: ' + (e.message || JSON.stringify(e)) +
+    '\n\n이 화면을 그대로 캡처해서 Claude에게 보여주세요.';
+});
+</script>
+</body>
+</html>

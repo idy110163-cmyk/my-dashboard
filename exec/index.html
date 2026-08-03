@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>경영 대시보드</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Pretendard',-apple-system,sans-serif; background:#f8fafc; color:#0f172a; padding:24px; }
+  .wrap { max-width:1200px; margin:0 auto; }
+  header { margin-bottom:20px; display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; }
+  header h1 { font-size:22px; font-weight:700; }
+  header .sub { font-size:13px; color:#64748b; }
+  header a { margin-left:auto; font-size:13px; color:#64748b; text-decoration:none; }
+  .areas { display:grid; grid-template-columns:repeat(5,1fr); gap:12px; margin-bottom:14px; }
+  .area { background:#fff; border:1px solid #e2e8f0; border-radius:14px; overflow:hidden; text-decoration:none; color:inherit; display:block; transition:transform .12s; }
+  .area:hover { transform:translateY(-2px); }
+  .area .stripe { height:5px; }
+  .area .body { padding:14px 16px; }
+  .area .name { font-size:12.5px; color:#64748b; margin-bottom:4px; }
+  .area .num { font-size:22px; font-weight:700; letter-spacing:-0.5px; }
+  .area .num small { font-size:12px; font-weight:500; }
+  .area .desc { font-size:11.5px; color:#94a3b8; margin-top:3px; }
+  .light { display:flex; align-items:center; gap:6px; margin-top:10px; font-size:12px; font-weight:600; }
+  .light .dot { width:10px; height:10px; border-radius:50%; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:14px; }
+  .panel { background:#fff; border:1px solid #e2e8f0; border-radius:14px; padding:20px; }
+  .panel h2 { font-size:15px; font-weight:600; margin-bottom:14px; }
+  .panel h2 span { font-size:12px; font-weight:400; color:#94a3b8; margin-left:6px; }
+  .ach-row { display:flex; align-items:center; gap:10px; margin-bottom:13px; }
+  .ach-name { width:64px; font-size:13px; color:#334155; flex-shrink:0; }
+  .ach-track { flex:1; background:#f1f5f9; border-radius:5px; height:18px; position:relative; }
+  .ach-track .mark { position:absolute; top:-3px; bottom:-3px; width:2px; background:#94a3b8; }
+  .ach-bar { height:100%; border-radius:5px; }
+  .ach-val { width:52px; text-align:right; font-size:13px; font-weight:700; flex-shrink:0; }
+  .chg { display:flex; align-items:flex-start; gap:12px; padding:12px 0; border-bottom:1px solid #f1f5f9; }
+  .chg:last-child { border-bottom:none; }
+  .chg .no { width:26px; height:26px; border-radius:8px; background:#f1f5f9; color:#475569; font-size:13px; font-weight:700; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+  .chg .txt { flex:1; }
+  .chg .t1 { font-size:14px; font-weight:600; }
+  .chg .t2 { font-size:12px; color:#64748b; margin-top:2px; }
+  .chg .delta { font-size:14.5px; font-weight:700; white-space:nowrap; }
+  .good { color:#16a34a; } .bad2 { color:#dc2626; }
+  .err { background:#fff; border:1px solid #fca5a5; color:#b91c1c; border-radius:14px; padding:20px; font-size:14px; line-height:1.6; display:none; margin-bottom:14px; white-space:pre-wrap; word-break:break-all; }
+  .loading { text-align:center; color:#94a3b8; padding:60px 0; font-size:14px; }
+  svg text { font-family:'Pretendard',sans-serif; }
+  @media (max-width:960px) { .areas { grid-template-columns:repeat(2,1fr); } }
+  @media (max-width:860px) {
+    body { padding:14px; }
+    .grid2 { grid-template-columns:1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>🏢 경영 대시보드</h1>
+    <span class="sub" id="updated"></span>
+    <a href="../">← 전체 대시보드</a>
+  </header>
+
+  <div class="err" id="errBox"></div>
+  <div class="loading" id="loading">데이터를 불러오는 중…</div>
+
+  <div id="content" style="display:none">
+    <div class="areas" id="areas"></div>
+
+    <div class="grid2">
+      <div class="panel">
+        <h2>영역별 목표 달성률 <span>세로선 = 100%</span></h2>
+        <div id="ach"></div>
+      </div>
+      <div class="panel">
+        <h2>이번 달 변화 TOP 3 <span>전월 대비</span></h2>
+        <div id="changes"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>6개월 종합 추이 <span>만원</span></h2>
+      <div id="trend"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const { createClient } = supabase;
+const db = createClient(
+  'https://ngqjcxjojskvglburgoc.supabase.co',
+  'sb_publishable_DB_a5tbS3nFQtukwe8NqPA_L5ACxV4x'
+);
+const fmt = n => n.toLocaleString('ko-KR');
+
+async function main() {
+  const [sa, mk, cu, pl, hr, tg] = await Promise.all([
+    db.from('sales_monthly').select('*').order('sort_order', { ascending: true }),
+    db.from('marketing_monthly').select('*').order('sort_order', { ascending: true }),
+    db.from('customer_summary').select('*').order('sort_order', { ascending: true }),
+    db.from('pl_summary').select('*').order('sort_order', { ascending: true }),
+    db.from('hr_monthly').select('*').order('sort_order', { ascending: true }),
+    db.from('exec_target').select('*').order('sort_order', { ascending: true })
+  ]);
+  for (const res of [sa, mk, cu, pl, hr, tg]) if (res.error) throw res.error;
+  const last = a => a[a.length-1], prev = a => a[a.length-2];
+  const S = last(sa.data), S0 = prev(sa.data);
+  const M = last(mk.data), M0 = prev(mk.data);
+  const C = last(cu.data), C0 = prev(cu.data);
+  const P = last(pl.data), P0 = prev(pl.data);
+  const H = last(hr.data), H0 = prev(hr.data);
+  const T = {}; tg.data.forEach(x => T[x.area] = x);
+
+  // 계산
+  const profit = P.revenue - P.cogs - P.sga - P.other_cost;
+  const profit0 = P0.revenue - P0.cogs - P0.sga - P0.other_cost;
+  const profitRate = profit / P.revenue * 100, profitRate0 = profit0 / P0.revenue * 100;
+  const payRatio = H.payroll / H.revenue * 100, payRatio0 = H0.payroll / H0.revenue * 100;
+
+  // 영역별: [이름, 색, 대표값, 보조설명, 달성률]
+  const areas = [
+    { name: '매출', col: '#2563eb', num: fmt(S.revenue)+'<small>만원</small>', desc: `목표 ${fmt(T['매출'].target)}만원`,
+      ach: S.revenue / T['매출'].target * 100, t: T['매출'], link: '../sales/' },
+    { name: '광고비', col: '#ea580c', num: fmt(M.spend)+'<small>만원</small>', desc: `ROAS ${M.roas}%`,
+      ach: Number(M.roas) / T['ROAS'].target * 100, t: T['ROAS'], link: '../marketing/' },
+    { name: '고객', col: '#0d9488', num: fmt(C.new_customers)+'<small>명 신규</small>', desc: `전체 ${fmt(C.total_customers)}명`,
+      ach: C.new_customers / T['신규고객'].target * 100, t: T['신규고객'], link: '../customer/' },
+    { name: '이익', col: '#16a34a', num: fmt(profit)+'<small>만원</small>', desc: `이익률 ${profitRate.toFixed(1)}%`,
+      ach: profit / T['영업이익'].target * 100, t: T['영업이익'], link: '../pl/' },
+    { name: '인력', col: '#7c3aed', num: H.headcount+'<small>명</small>', desc: `인건비율 ${payRatio.toFixed(1)}%`,
+      ach: T['인건비율'].target / payRatio * 100, t: T['인건비율'], link: '../hr/' }
+  ];
+  const light = a => {
+    if (a.ach >= Number(a.t.green)) return { c: '#16a34a', l: '정상' };
+    if (a.ach >= Number(a.t.yellow)) return { c: '#eab308', l: '주의' };
+    return { c: '#dc2626', l: '경고' };
+  };
+  document.getElementById('areas').innerHTML = areas.map(a => {
+    const lt = light(a);
+    return `<a class="area" href="${a.link}">
+      <div class="stripe" style="background:${a.col}"></div>
+      <div class="body">
+        <div class="name">${a.name}</div>
+        <div class="num">${a.num}</div>
+        <div class="desc">${a.desc}</div>
+        <div class="light"><div class="dot" style="background:${lt.c}"></div><span style="color:${lt.c}">${lt.l}</span></div>
+      </div>
+    </a>`;
+  }).join('');
+
+  // ---- 달성률 가로 막대 ----
+  const maxAch = Math.max(120, ...areas.map(a=>a.ach)) * 1.05;
+  document.getElementById('ach').innerHTML = areas.map(a => `
+    <div class="ach-row">
+      <div class="ach-name">${a.name}</div>
+      <div class="ach-track">
+        <div class="ach-bar" style="width:${Math.min(a.ach/maxAch*100,100)}%;background:${a.col}"></div>
+        <div class="mark" style="left:${100/maxAch*100}%"></div>
+      </div>
+      <div class="ach-val">${a.ach.toFixed(0)}%</div>
+    </div>`).join('');
+
+  // ---- 변화 TOP3 ----
+  const pct = (now, was) => (now - was) / Math.abs(was) * 100;
+  const cands = [
+    { name: '매출', d: pct(S.revenue, S0.revenue), badUp: false, desc: `${fmt(S0.revenue)} → ${fmt(S.revenue)}만원` },
+    { name: 'ROAS', d: pct(Number(M.roas), Number(M0.roas)), badUp: false, desc: `${M0.roas}% → ${M.roas}%` },
+    { name: '이탈률', d: pct(Number(C.churn_rate), Number(C0.churn_rate)), badUp: true, desc: `${C0.churn_rate}% → ${C.churn_rate}%` },
+    { name: '영업이익률', d: pct(profitRate, profitRate0), badUp: false, desc: `${profitRate0.toFixed(1)}% → ${profitRate.toFixed(1)}%` },
+    { name: '인건비 비중', d: pct(payRatio, payRatio0), badUp: true, desc: `${payRatio0.toFixed(1)}% → ${payRatio.toFixed(1)}%` }
+  ];
+  cands.sort((a,b)=>Math.abs(b.d)-Math.abs(a.d));
+  document.getElementById('changes').innerHTML = cands.slice(0,3).map((x,i) => {
+    const isBad = x.badUp ? x.d > 0 : x.d < 0;
+    return `<div class="chg">
+      <div class="no">${i+1}</div>
+      <div class="txt"><div class="t1">${x.name}</div><div class="t2">${x.desc}</div></div>
+      <div class="delta ${isBad?'bad2':'good'}">${x.d>=0?'+':''}${x.d.toFixed(1)}%</div>
+    </div>`;
+  }).join('');
+
+  // ---- 6개월 추이 선그래프 ----
+  const months = sa.data.map(x=>x.month);
+  const series = [
+    { name: '매출', col: '#2563eb', vals: pl.data.map(x=>x.revenue) },
+    { name: '영업이익', col: '#16a34a', vals: pl.data.map(x=>x.revenue-x.cogs-x.sga-x.other_cost) },
+    { name: '광고비', col: '#ea580c', vals: mk.data.map(x=>x.spend) }
+  ];
+  const W = 900, Ht = 260, padL = 52, padB = 30, padT = 18;
+  const cw = W - padL - 90, chH = Ht - padT - padB;
+  const allV = series.flatMap(s=>s.vals);
+  const maxV = Math.max(...allV)*1.1, minV = 0;
+  const X = i => padL + cw/months.length*(i+0.5);
+  const Y = v => padT + chH - ((v-minV)/(maxV-minV)*chH);
+  let grid = '';
+  for (let i=0;i<=4;i++){
+    const gv = maxV/4*i;
+    grid += `<line x1="${padL}" y1="${Y(gv)}" x2="${padL+cw}" y2="${Y(gv)}" stroke="#eef2f7"/>
+      <text x="${padL-8}" y="${Y(gv)+4}" text-anchor="end" font-size="11" fill="#94a3b8">${fmt(Math.round(gv))}</text>`;
+  }
+  // 오른쪽 라벨이 겹치지 않게 최소 16px 간격 확보
+  const labelYs = series.map(s => Y(s.vals[s.vals.length-1]));
+  const order = labelYs.map((y,i)=>({y,i})).sort((a,b)=>a.y-b.y);
+  for (let k = 1; k < order.length; k++) {
+    if (order[k].y - order[k-1].y < 16) order[k].y = order[k-1].y + 16;
+  }
+  order.forEach(o => labelYs[o.i] = o.y);
+  let lines = '';
+  series.forEach((s, si) => {
+    const d = s.vals.map((v,i)=>(i?'L':'M')+X(i)+','+Y(v)).join(' ');
+    lines += `<path d="${d}" fill="none" stroke="${s.col}" stroke-width="2.5"/>` +
+      s.vals.map((v,i)=>`<circle cx="${X(i)}" cy="${Y(v)}" r="3.5" fill="${s.col}" stroke="#fff" stroke-width="1.5"/>`).join('') +
+      `<text x="${padL+cw+8}" y="${labelYs[si]+4}" font-size="12" font-weight="600" fill="${s.col}">${s.name}</text>`;
+  });
+  const xl = months.map((mo,i)=>`<text x="${X(i)}" y="${Ht-8}" text-anchor="middle" font-size="12" fill="#64748b">${mo}</text>`).join('');
+  document.getElementById('trend').innerHTML =
+    `<svg viewBox="0 0 ${W} ${Ht}" style="width:100%;height:auto">${grid}${lines}${xl}</svg>`;
+
+  document.getElementById('updated').textContent =
+    new Date().toLocaleString('ko-KR', { dateStyle: 'medium', timeStyle: 'short' }) + ' 기준';
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('content').style.display = 'block';
+}
+main().catch(e => {
+  document.getElementById('loading').style.display = 'none';
+  const box = document.getElementById('errBox');
+  box.style.display = 'block';
+  box.textContent = '데이터를 불러오지 못했습니다.\n\n오류 내용: ' + (e.message || JSON.stringify(e)) +
+    '\n\n이 화면을 그대로 캡처해서 Claude에게 보여주세요.';
+});
+</script>
+</body>
+</html>

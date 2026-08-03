@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>손익 대시보드</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Pretendard',-apple-system,sans-serif; background:#f8fafc; color:#0f172a; padding:24px; }
+  .wrap { max-width:1200px; margin:0 auto; }
+  header { margin-bottom:20px; display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; }
+  header h1 { font-size:22px; font-weight:700; }
+  header .sub { font-size:13px; color:#64748b; }
+  header a { margin-left:auto; font-size:13px; color:#64748b; text-decoration:none; }
+  .cards { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:14px; }
+  .card { background:#fff; border:1px solid #e2e8f0; border-radius:14px; padding:18px 20px; }
+  .card .label { font-size:13px; color:#64748b; margin-bottom:6px; }
+  .card .value { font-size:26px; font-weight:700; letter-spacing:-0.5px; }
+  .card .value.big { font-size:32px; color:#16a34a; }
+  .card .sub { font-size:12.5px; color:#64748b; margin-top:6px; }
+  .card .sub strong { color:#0f172a; }
+  .bad { color:#dc2626 !important; }
+  .progress { height:8px; background:#e8f5ec; border-radius:4px; margin-top:10px; overflow:hidden; }
+  .progress > div { height:100%; background:#16a34a; border-radius:4px; }
+  .grid2 { display:grid; grid-template-columns:3fr 2fr; gap:14px; margin-bottom:14px; }
+  .grid2b { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  .panel { background:#fff; border:1px solid #e2e8f0; border-radius:14px; padding:20px; }
+  .panel h2 { font-size:15px; font-weight:600; margin-bottom:14px; }
+  .panel h2 span { font-size:12px; font-weight:400; color:#94a3b8; margin-left:6px; }
+  table.cost { width:100%; border-collapse:collapse; font-size:13.5px; }
+  table.cost th { text-align:left; color:#64748b; font-weight:500; padding:8px 6px; border-bottom:1px solid #e2e8f0; }
+  table.cost td { padding:10px 6px; border-bottom:1px solid #f1f5f9; }
+  table.cost td:nth-child(3), table.cost td:nth-child(4), table.cost th:nth-child(3), table.cost th:nth-child(4) { text-align:right; }
+  .tag { display:inline-block; font-size:11.5px; padding:2px 8px; border-radius:20px; font-weight:600; }
+  .tag.fix { background:#eef2f7; color:#475569; }
+  .tag.var { background:#fef3c7; color:#92400e; }
+  .rank-row { display:flex; align-items:center; gap:10px; margin-bottom:12px; }
+  .rank-name { width:84px; font-size:13.5px; color:#334155; flex-shrink:0; }
+  .rank-track { flex:1; display:flex; align-items:center; }
+  .rank-amt { width:52px; text-align:right; font-size:13px; font-weight:600; flex-shrink:0; }
+  .err { background:#fff; border:1px solid #fca5a5; color:#b91c1c; border-radius:14px; padding:20px; font-size:14px; line-height:1.6; display:none; margin-bottom:14px; white-space:pre-wrap; word-break:break-all; }
+  .loading { text-align:center; color:#94a3b8; padding:60px 0; font-size:14px; }
+  svg text { font-family:'Pretendard',sans-serif; }
+  @media (max-width:860px) {
+    body { padding:14px; }
+    .cards { grid-template-columns:repeat(2,1fr); }
+    .grid2, .grid2b { grid-template-columns:1fr; }
+    .card .value.big { font-size:26px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>💰 손익 대시보드</h1>
+    <span class="sub" id="updated"></span>
+    <a href="../">← 전체 대시보드</a>
+  </header>
+
+  <div class="err" id="errBox"></div>
+  <div class="loading" id="loading">데이터를 불러오는 중…</div>
+
+  <div id="content" style="display:none">
+    <div class="cards" id="cards"></div>
+
+    <div class="grid2">
+      <div class="panel">
+        <h2>손익 구조 <span>이번 달, 만원</span></h2>
+        <div id="waterfall"></div>
+      </div>
+      <div class="panel">
+        <h2>손익분기 달성률</h2>
+        <div id="gauge"></div>
+      </div>
+    </div>
+
+    <div class="grid2b" style="margin-top:14px">
+      <div class="panel">
+        <h2>비용 순위 <span>만원</span></h2>
+        <div id="costTable"></div>
+      </div>
+      <div class="panel">
+        <h2>상품별 공헌이익률</h2>
+        <div id="margins"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const { createClient } = supabase;
+const db = createClient(
+  'https://ngqjcxjojskvglburgoc.supabase.co',
+  'sb_publishable_DB_a5tbS3nFQtukwe8NqPA_L5ACxV4x'
+);
+const fmt = n => n.toLocaleString('ko-KR');
+const TARGET_PROFIT = 1100, TARGET_RATE = 12;
+
+async function main() {
+  const [s, c, mg] = await Promise.all([
+    db.from('pl_summary').select('*').order('sort_order', { ascending: true }),
+    db.from('pl_cost').select('*').order('amount', { ascending: false }),
+    db.from('pl_margin').select('*').order('margin_rate', { ascending: false })
+  ]);
+  for (const res of [s, c, mg]) if (res.error) throw res.error;
+  const sum = s.data, cost = c.data, margin = mg.data;
+  const cur = sum[sum.length-1], prev = sum[sum.length-2];
+
+  const profit = cur.revenue - cur.cogs - cur.sga - cur.other_cost;
+  const rate = profit / cur.revenue * 100;
+  const totalCost = cur.cogs + cur.sga + cur.other_cost;
+  const bep = cur.revenue / totalCost * 100;
+  const prevCost = prev.cogs + prev.sga + prev.other_cost;
+  const costDiff = totalCost - prevCost;
+  const profitAch = profit / TARGET_PROFIT * 100;
+
+  // ---- 카드 ----
+  document.getElementById('cards').innerHTML = `
+    <div class="card">
+      <div class="label">영업이익 (${cur.month})</div>
+      <div class="value big ${profit < 0 ? 'bad' : ''}">${fmt(profit)}<span style="font-size:16px">만원</span></div>
+      <div class="progress"><div style="width:${Math.min(Math.max(profitAch,0),100)}%"></div></div>
+      <div class="sub">목표 ${fmt(TARGET_PROFIT)}만원 대비 <strong>${profitAch.toFixed(1)}%</strong></div>
+    </div>
+    <div class="card">
+      <div class="label">영업이익률</div>
+      <div class="value">${rate.toFixed(1)}<span style="font-size:15px">%</span></div>
+      <div class="sub">목표 ${TARGET_RATE}%까지 <strong class="${rate >= TARGET_RATE ? '' : 'bad'}">${rate >= TARGET_RATE ? '달성' : (TARGET_RATE-rate).toFixed(1)+'%p 부족'}</strong></div>
+    </div>
+    <div class="card">
+      <div class="label">손익분기 달성률</div>
+      <div class="value">${bep.toFixed(1)}<span style="font-size:15px">%</span></div>
+      <div class="sub">${bep >= 100 ? '손익분기점을 넘었습니다' : '아직 손익분기점 아래입니다'}</div>
+    </div>
+    <div class="card">
+      <div class="label">총비용</div>
+      <div class="value">${fmt(totalCost)}<span style="font-size:15px">만원</span></div>
+      <div class="sub">전월 대비 <strong class="${costDiff >= 0 ? 'bad' : ''}">${costDiff >= 0 ? '+' : ''}${fmt(costDiff)}만원</strong></div>
+    </div>`;
+
+  // ---- 폭포 그래프 ----
+  const steps = [
+    { name: '매출', v: cur.revenue, type: 'rev' },
+    { name: '원가', v: -cur.cogs, type: 'cost' },
+    { name: '판관비', v: -cur.sga, type: 'cost' },
+    { name: '기타', v: -cur.other_cost, type: 'cost' },
+    { name: '영업이익', v: profit, type: 'profit' }
+  ];
+  const W = 560, H = 270, padL = 50, padB = 30, padT = 16;
+  const cw = W - padL - 14, chH = H - padT - padB;
+  const maxV = cur.revenue * 1.08;
+  const y = v => padT + chH - (v / maxV * chH);
+  const bw = cw / steps.length * 0.56;
+  let run = 0, svg = '';
+  for (let i = 0; i <= 4; i++) {
+    const gv = maxV / 4 * i;
+    svg += `<line x1="${padL}" y1="${y(gv)}" x2="${W-14}" y2="${y(gv)}" stroke="#eef2f7"/>
+      <text x="${padL-8}" y="${y(gv)+4}" text-anchor="end" font-size="11" fill="#94a3b8">${fmt(Math.round(gv))}</text>`;
+  }
+  steps.forEach((st, i) => {
+    const cx = padL + cw / steps.length * (i + 0.5);
+    let top, bot, col;
+    if (st.type === 'rev') { top = st.v; bot = 0; col = '#16a34a'; run = st.v; }
+    else if (st.type === 'cost') { top = run; run += st.v; bot = run; col = '#cbd5e1'; }
+    else { top = st.v; bot = 0; col = st.v >= 0 ? '#16a34a' : '#dc2626'; }
+    const yT = y(Math.max(top, bot)), hh = Math.abs(y(bot) - y(top));
+    svg += `<rect x="${cx-bw/2}" y="${yT}" width="${bw}" height="${Math.max(hh,2)}" rx="4" fill="${col}"/>
+      <text x="${cx}" y="${yT-6}" text-anchor="middle" font-size="11.5" font-weight="600"
+        fill="${st.type==='cost' ? '#64748b' : col}">${st.type==='cost' ? '-' : ''}${fmt(Math.abs(st.v))}</text>
+      <text x="${cx}" y="${H-8}" text-anchor="middle" font-size="12" fill="#475569">${st.name}</text>`;
+    if (st.type === 'cost' && i < steps.length - 1) {
+      svg += `<line x1="${cx+bw/2}" y1="${y(run)}" x2="${cx + cw/steps.length - bw/2}" y2="${y(run)}" stroke="#94a3b8" stroke-dasharray="3 3"/>`;
+    }
+    if (st.type === 'rev') {
+      svg += `<line x1="${cx+bw/2}" y1="${y(st.v)}" x2="${cx + cw/steps.length - bw/2}" y2="${y(st.v)}" stroke="#94a3b8" stroke-dasharray="3 3"/>`;
+    }
+  });
+  document.getElementById('waterfall').innerHTML =
+    `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto">${svg}</svg>`;
+
+  // ---- 반원 게이지 ----
+  const gW = 300, gH = 190, cx = 150, cy = 150, R = 105;
+  const clamp = Math.min(Math.max(bep, 0), 150);
+  const ang = Math.PI * (1 - clamp / 150);
+  const nx = cx + R * Math.cos(ang), ny = cy - R * Math.sin(ang);
+  let ticks = '';
+  for (let t = 0; t <= 150; t += 25) {
+    const a = Math.PI * (1 - t / 150);
+    const x1 = cx + (R+8) * Math.cos(a), y1 = cy - (R+8) * Math.sin(a);
+    const x2 = cx + (R+16) * Math.cos(a), y2 = cy - (R+16) * Math.sin(a);
+    ticks += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#cbd5e1" stroke-width="2"/>
+      <text x="${cx + (R+27)*Math.cos(a)}" y="${cy - (R+27)*Math.sin(a) + 4}" text-anchor="middle" font-size="10" fill="#94a3b8">${t}</text>`;
+  }
+  const arc = (from, to, col, w) => {
+    const a1 = Math.PI * (1 - from / 150), a2 = Math.PI * (1 - to / 150);
+    const x1 = cx + R * Math.cos(a1), y1 = cy - R * Math.sin(a1);
+    const x2 = cx + R * Math.cos(a2), y2 = cy - R * Math.sin(a2);
+    return `<path d="M ${x1} ${y1} A ${R} ${R} 0 ${to - from > 75 ? 1 : 0} 1 ${x2} ${y2}" fill="none" stroke="${col}" stroke-width="${w}" stroke-linecap="round"/>`;
+  };
+  document.getElementById('gauge').innerHTML = `
+    <svg viewBox="0 0 ${gW} ${gH}" style="width:100%;max-width:320px;height:auto;display:block;margin:0 auto">
+      ${arc(0, 150, '#e8f5ec', 18)}
+      ${arc(0, clamp, bep >= 100 ? '#16a34a' : '#eab308', 18)}
+      ${ticks}
+      <line x1="${cx}" y1="${cy}" x2="${nx}" y2="${ny}" stroke="#0f172a" stroke-width="3" stroke-linecap="round"/>
+      <circle cx="${cx}" cy="${cy}" r="6" fill="#0f172a"/>
+      <text x="${cx}" y="${cy-32}" text-anchor="middle" font-size="27" font-weight="700" fill="#0f172a">${bep.toFixed(1)}%</text>
+    </svg>
+    <div style="text-align:center;font-size:13px;color:#475569;margin-top:8px">
+      손익분기점 매출 <b>${fmt(totalCost)}만원</b> · 현재 매출 <b>${fmt(cur.revenue)}만원</b>
+    </div>`;
+
+  // ---- 비용 표 ----
+  const costSum = cost.reduce((a,x)=>a+x.amount,0);
+  document.getElementById('costTable').innerHTML = `
+    <table class="cost">
+      <tr><th>항목</th><th>구분</th><th>금액</th><th>비중</th></tr>
+      ${cost.map(x=>`<tr>
+        <td>${x.item}</td>
+        <td><span class="tag ${x.cost_type==='고정'?'fix':'var'}">${x.cost_type}</span></td>
+        <td><b>${fmt(x.amount)}</b></td>
+        <td>${(x.amount/costSum*100).toFixed(1)}%</td>
+      </tr>`).join('')}
+    </table>`;
+
+  // ---- 공헌이익률 ----
+  const maxM = Math.max(...margin.map(x=>Math.abs(Number(x.margin_rate))));
+  document.getElementById('margins').innerHTML = margin.map(x => {
+    const v = Number(x.margin_rate), neg = v < 0;
+    const w = Math.abs(v)/maxM*100;
+    return `<div class="rank-row">
+      <div class="rank-name">${x.product}</div>
+      <div class="rank-track" style="background:${neg?'#fee2e2':'#e8f5ec'};border-radius:4px;height:22px">
+        <div style="height:100%;width:${w}%;background:${neg?'#dc2626':'#16a34a'};border-radius:4px"></div>
+      </div>
+      <div class="rank-amt" style="color:${neg?'#dc2626':'#0f172a'}">${v}%</div>
+    </div>`;
+  }).join('');
+
+  document.getElementById('updated').textContent =
+    new Date().toLocaleString('ko-KR', { dateStyle: 'medium', timeStyle: 'short' }) + ' 기준';
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('content').style.display = 'block';
+}
+main().catch(e => {
+  document.getElementById('loading').style.display = 'none';
+  const box = document.getElementById('errBox');
+  box.style.display = 'block';
+  box.textContent = '데이터를 불러오지 못했습니다.\n\n오류 내용: ' + (e.message || JSON.stringify(e)) +
+    '\n\n이 화면을 그대로 캡처해서 Claude에게 보여주세요.';
+});
+</script>
+</body>
+</html>
