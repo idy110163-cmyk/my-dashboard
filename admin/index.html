@@ -51,32 +51,32 @@
     <div class="wrap">
       <header>
         <h1>🔧 대시보드 관리</h1>
-      <a href="../">← 전체 대시보드</a>a>
+      <a href="../">← 전체 대시보드</a>
       </header>
     <div class="panel login" id="loginBox">
     <h2>관리자 로그인</h2>
     <p>데이터를 수정하려면 로그인이 필요합니다.</p>
     <input type="email" id="email" placeholder="이메일" autocomplete="username">
     <input type="password" id="password" placeholder="비밀번호" autocomplete="current-password">
-    <button class="btn-primary" id="loginBtn">로그인</button>button>
-    <div class="msg" id="loginMsg"></div>div>
-    </div>div>
+    <button class="btn-primary" id="loginBtn">로그인</button>
+    <div class="msg" id="loginMsg"></div>
+    </div>
     <div id="editor" style="display:none">
     <div class="panel">
     <div class="toolbar">
-    <select id="tableSel"></select>select>
-    <button class="btn-sm btn-gray" id="reloadBtn">↺ 다시 불러오기</button>button>
-    <div class="spacer"></div>div>
-    <button class="btn-sm btn-gray" id="addBtn">＋ 행 추가</button>button>
-    <button class="btn-sm btn-blue" id="saveBtn">💾 저장</button>button>
-    <button class="btn-sm btn-gray" id="logoutBtn">로그아웃</button>button>
-    </div>div>
-    <div class="hint">셀을 클릭해 수정 → <b>저장</b>을 누르면 대시보드에 바로 반영됩니다. 수정한 칸은 주황색으로 표시돼요.</div>div>
-    <div class="tbl-scroll" id="grid"><div class="loading">불러오는 중…</div>div></div>div>
-    <div class="msg" id="msg"></div>div>
-    </div>div>
-    </div>div>
-    </div>div>
+    <select id="tableSel"></select>
+    <button class="btn-sm btn-gray" id="reloadBtn">↺ 다시 불러오기</button>
+    <div class="spacer"></div>
+    <button class="btn-sm btn-gray" id="addBtn">＋ 행 추가</button>
+    <button class="btn-sm btn-blue" id="saveBtn">💾 저장</button>
+    <button class="btn-sm btn-gray" id="logoutBtn">로그아웃</button>
+    </div>
+    <div class="hint">셀을 클릭해 수정 → <b>저장</b>을 누르면 대시보드에 바로 반영됩니다. 수정한 칸은 주황색으로 표시돼요.</div>
+    <div class="tbl-scroll" id="grid"><div class="loading">불러오는 중…</div></div>
+    <div class="msg" id="msg"></div>
+    </div>
+    </div>
+    </div>
   <script>
     const { createClient } = supabase;
     const db = createClient('https://ngqjcxjojskvglburgoc.supabase.co', 'sb_publishable_DB_a5tbS3nFQtukwe8NqPA_L5ACxV4x');
@@ -201,4 +201,4 @@
     db.auth.getSession().then(({ data }) => { if (data.session) enter(); });
   </script>
   </body>
-</html>html>
+</html>
