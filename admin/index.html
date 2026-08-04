@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>대시보드 관리</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { font-family:'Pretendard',-apple-system,sans-serif; background:#f8fafc; color:#0f172a; padding:24px; }
+    .wrap { max-width:1100px; margin:0 auto; }
+    header { margin-bottom:20px; display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+    header h1 { font-size:22px; font-weight:700; }
+    header a { margin-left:auto; font-size:13px; color:#64748b; text-decoration:none; }
+    .panel { background:#fff; border:1px solid #e2e8f0; border-radius:14px; padding:24px; }
+    .login { max-width:380px; margin:60px auto; }
+    .login h2 { font-size:18px; margin-bottom:6px; }
+    .login p { font-size:13px; color:#64748b; margin-bottom:18px; }
+    .login input { width:100%; padding:11px 14px; border:1px solid #cbd5e1; border-radius:10px; font-size:14px; font-family:inherit; margin-bottom:10px; }
+    .login input:focus { outline:2px solid #2563eb; border-color:transparent; }
+    button { font-family:inherit; cursor:pointer; border:none; border-radius:10px; font-size:14px; font-weight:600; }
+    .btn-primary { background:#2563eb; color:#fff; padding:11px 20px; width:100%; }
+    .btn-primary:hover { background:#1d4ed8; }
+    .btn-sm { padding:8px 14px; font-size:13px; }
+    .btn-blue { background:#2563eb; color:#fff; }
+    .btn-gray { background:#f1f5f9; color:#334155; }
+    button:disabled { opacity:.5; cursor:not-allowed; }
+    .toolbar { display:flex; gap:10px; align-items:center; margin-bottom:16px; flex-wrap:wrap; }
+    .toolbar select { padding:9px 12px; border:1px solid #cbd5e1; border-radius:10px; font-size:14px; font-family:inherit; background:#fff; min-width:220px; }
+    .toolbar .spacer { flex:1; }
+    .hint { font-size:12.5px; color:#64748b; margin-bottom:12px; line-height:1.6; }
+    .tbl-scroll { overflow-x:auto; }
+    table.edit { border-collapse:collapse; width:100%; font-size:13.5px; }
+    table.edit th { text-align:left; color:#64748b; font-weight:600; padding:8px 8px; border-bottom:2px solid #e2e8f0; white-space:nowrap; font-size:12.5px; }
+    table.edit td { padding:4px 4px; border-bottom:1px solid #f1f5f9; }
+    table.edit input { width:100%; min-width:80px; padding:8px 10px; border:1px solid transparent; border-radius:8px; font-size:13.5px; font-family:inherit; background:transparent; }
+    table.edit input:hover { background:#f8fafc; }
+    table.edit input:focus { outline:none; border-color:#2563eb; background:#fff; }
+    table.edit input.changed { background:#fff7ed; border-color:#fdba74; }
+    table.edit td.id { color:#94a3b8; font-size:12px; width:44px; }
+    .del { background:none; color:#cbd5e1; font-size:16px; padding:4px 8px; }
+    .del:hover { color:#dc2626; }
+    .msg { margin-top:14px; font-size:13.5px; padding:12px 14px; border-radius:10px; display:none; }
+    .msg.ok { display:block; background:#f0fdf4; color:#166534; }
+    .msg.error { display:block; background:#fef2f2; color:#b91c1c; white-space:pre-wrap; }
+    .loading { text-align:center; color:#94a3b8; padding:40px 0; font-size:14px; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header>
+        <h1>🔧 대시보드 관리</h1>
+      <a href="../">← 전체 대시보드</a>a>
+      </header>
+    <div class="panel login" id="loginBox">
+    <h2>관리자 로그인</h2>
+    <p>데이터를 수정하려면 로그인이 필요합니다.</p>
+    <input type="email" id="email" placeholder="이메일" autocomplete="username">
+    <input type="password" id="password" placeholder="비밀번호" autocomplete="current-password">
+    <button class="btn-primary" id="loginBtn">로그인</button>button>
+    <div class="msg" id="loginMsg"></div>div>
+    </div>div>
+    <div id="editor" style="display:none">
+    <div class="panel">
+    <div class="toolbar">
+    <select id="tableSel"></select>select>
+    <button class="btn-sm btn-gray" id="reloadBtn">↺ 다시 불러오기</button>button>
+    <div class="spacer"></div>div>
+    <button class="btn-sm btn-gray" id="addBtn">＋ 행 추가</button>button>
+    <button class="btn-sm btn-blue" id="saveBtn">💾 저장</button>button>
+    <button class="btn-sm btn-gray" id="logoutBtn">로그아웃</button>button>
+    </div>div>
+    <div class="hint">셀을 클릭해 수정 → <b>저장</b>을 누르면 대시보드에 바로 반영됩니다. 수정한 칸은 주황색으로 표시돼요.</div>div>
+    <div class="tbl-scroll" id="grid"><div class="loading">불러오는 중…</div>div></div>div>
+    <div class="msg" id="msg"></div>div>
+    </div>div>
+    </div>div>
+    </div>div>
+  <script>
+    const { createClient } = supabase;
+    const db = createClient('https://ngqjcxjojskvglburgoc.supabase.co', 'sb_publishable_DB_a5tbS3nFQtukwe8NqPA_L5ACxV4x');
+    const TABLES = [
+      ['영업 · 월별 매출 (만원)', 'sales_monthly', 'sort_order'],
+      ['영업 · ERP 월 요약 (원)', 'sales_erp_summary', 'id'],
+      ['영업 · 팀별 순수매출 (원)', 'sales_team', 'id'],
+      ['영업 · 담당자별 순수매출 (원)', 'sales_person', 'rank'],
+      ['마케팅 · 채널별 성과', 'marketing_channel', 'id'],
+      ['마케팅 · 월별 광고비/ROAS', 'marketing_monthly', 'sort_order'],
+      ['마케팅 · 예산', 'marketing_budget', 'id'],
+      ['고객 · 월별 요약', 'customer_summary', 'sort_order'],
+      ['고객 · 코호트 잔존율', 'customer_cohort', 'sort_order'],
+      ['고객 · 재구매율', 'customer_repeat', 'sort_order'],
+      ['손익 · 월별 요약 (만원)', 'pl_summary', 'sort_order'],
+      ['손익 · 비용 항목', 'pl_cost', 'id'],
+      ['손익 · 상품별 이익률', 'pl_margin', 'id'],
+      ['인사 · 월별 현황', 'hr_monthly', 'sort_order'],
+      ['인사 · 부서별', 'hr_dept', 'id'],
+      ['인사 · 근속 분포', 'hr_tenure', 'sort_order'],
+      ['인사 · 초과근무', 'hr_overtime', 'id'],
+      ['경영 · 목표값', 'exec_target', 'sort_order']
+      ];
+    let rows = [], cols = [], curTable = null, deleted = [];
+    const $ = id => document.getElementById(id);
+    const showMsg = (el, text, ok) => { const m=$(el); m.textContent=text; m.className='msg '+(ok?'ok':'error'); };
+    const clearMsg = el => { $(el).className='msg'; };
+    $('loginBtn').onclick = async () => {
+      clearMsg('loginMsg');
+      $('loginBtn').disabled = true;
+      const { error } = await db.auth.signInWithPassword({ email: $('email').value.trim(), password: $('password').value });
+      $('loginBtn').disabled = false;
+      if (error) return showMsg('loginMsg', '로그인 실패: 이메일/비밀번호를 확인하세요.', false);
+      enter();
+    };
+    $('password').addEventListener('keydown', e => { if (e.key === 'Enter') $('loginBtn').click(); });
+    $('logoutBtn').onclick = async () => { await db.auth.signOut(); location.reload(); };
+    async function enter() {
+      $('loginBox').style.display = 'none';
+      $('editor').style.display = 'block';
+      const sel = $('tableSel');
+      sel.innerHTML = TABLES.map((t,i) => '<option value="'+i+'">'+t[0]+'</option>').join('');
+      sel.onchange = () => load(+sel.value);
+      $('reloadBtn').onclick = () => load(+sel.value);
+      load(0);
+    }
+    async function load(idx) {
+      clearMsg('msg');
+      curTable = TABLES[idx];
+      deleted = [];
+      $('grid').innerHTML = '<div class="loading">불러오는 중…</div>';
+      const { data, error } = await db.from(curTable[1]).select('*').order(curTable[2], { ascending: true });
+      if (error) return showMsg('msg', '불러오기 실패: ' + error.message, false);
+      rows = data;
+      cols = rows.length ? Object.keys(rows[0]) : ['id'];
+      render();
+    }
+    function render() {
+      let html = '<table class="edit"><tr><th></th>' + cols.map(c => '<th>'+c+'</th>').join('') + '<th></th></tr>';
+      rows.forEach((r, ri) => {
+        html += '<tr><td class="id">' + (r.id ?? '새 행') + '</td>' +
+          cols.map(c => c === 'id' ? '<td class="id">' + (r.id ?? '') + '</td>' : '<td><input data-ri="'+ri+'" data-col="'+c+'" value="'+(r[c] ?? '')+'"></td>').join('') +
+          '<td><button class="del" data-ri="'+ri+'" title="행 삭제">✕</button></td></tr>';
+      });
+      html += '</table>';
+      $('grid').innerHTML = html;
+      $('grid').querySelectorAll('input').forEach(inp => {
+        inp.addEventListener('input', e => {
+          const ri = e.target.dataset.ri, col = e.target.dataset.col;
+          rows[ri][col] = e.target.value;
+          rows[ri]._dirty = true;
+          e.target.classList.add('changed');
+        });
+      });
+      $('grid').querySelectorAll('.del').forEach(btn => {
+        btn.onclick = () => {
+          const ri = +btn.dataset.ri;
+          if (!confirm('이 행을 삭제할까요? (저장을 눌러야 최종 반영)')) return;
+          if (rows[ri].id != null) deleted.push(rows[ri].id);
+          rows.splice(ri, 1);
+          render();
+        };
+      });
+    }
+    $('addBtn').onclick = () => {
+      const blank = {};
+      cols.forEach(c => { if (c !== 'id') blank[c] = ''; });
+      blank.id = null; blank._dirty = true;
+      rows.push(blank);
+      render();
+    };
+    $('saveBtn').onclick = async () => {
+      clearMsg('msg');
+      $('saveBtn').disabled = true;
+      try {
+        if (deleted.length) {
+          const { error } = await db.from(curTable[1]).delete().in('id', deleted);
+          if (error) throw error;
+        }
+        const dirty = rows.filter(r => r._dirty);
+        for (const r of dirty) {
+          const payload = {};
+          cols.forEach(c => {
+            if (c === 'id') return;
+            let v = r[c];
+            if (v === '' || v == null) v = null;
+            else if (!isNaN(v) && String(v).trim() !== '') v = Number(v);
+            payload[c] = v;
+          });
+          let q;
+          if (r.id != null) q = await db.from(curTable[1]).update(payload).eq('id', r.id);
+          else q = await db.from(curTable[1]).insert(payload);
+          if (q.error) throw q.error;
+        }
+        showMsg('msg', '저장 완료! (수정 '+dirty.length+'건, 삭제 '+deleted.length+'건) — 대시보드를 새로고침하면 반영돼 있어요.', true);
+        load(+$('tableSel').value);
+      } catch (e) {
+        showMsg('msg', '저장 실패: ' + (e.message || JSON.stringify(e)) + '\n로그인이 만료됐다면 새로고침 후 다시 로그인해 주세요.', false);
+      }
+      $('saveBtn').disabled = false;
+    };
+    db.auth.getSession().then(({ data }) => { if (data.session) enter(); });
+  </script>
+  </body>
+</html>html>
